@@ -68,7 +68,7 @@ ssize_t sxfs_find_entry (const void **table, size_t size, const char *name, int 
 
 int sxfs_ls_update (const char *absolute_path, sxfs_lsdir_t **dir);
 int sxfs_ls_stat (const char *path, struct stat *st); /* returned values: <0 - error /  0 - not found / 1 - file / 2 - directory */
-int sxfs_update_mtime (const char *local_file_path, const char *remote_file_path, sxfs_lsfile_t *lsfile);
+int sxfs_upload_force (const char *local_file_path, const char *remote_file_path, sxfs_lsfile_t *lsfile);
 
 int sxfs_delete_check_path (const char *path);
 int sxfs_delete_rename_prepare (const char *path, const char *newpath);

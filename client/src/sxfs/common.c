@@ -1751,9 +1751,10 @@ static void* sxfs_delete_worker (void *ctx) {
     sxfs_state_t *sxfs = (sxfs_state_t*)ctx;
     sxfs_queue_entry_t *entry;
 
-    if((err = sxfs_get_sx_data(sxfs, &sx, &cluster))) {
+    if(sxfs_get_sx_data(sxfs, &sx, &cluster)) {
         SXFS_ERROR("Cannot get SX data");
-        return NULL;
+        err = 0;
+        goto sxfs_delete_worker_err;
     }
     pthread_mutex_lock(&sxfs->delete_mutex);
     entry = delete_queue.next;
@@ -2406,9 +2407,10 @@ static void* sxfs_upload_worker (void *ctx) {
     sxfs_state_t *sxfs = (sxfs_state_t*)ctx;
     sxfs_queue_entry_t *entry;
 
-    if((err = sxfs_get_sx_data(sxfs, &sx, &cluster))) {
+    if(sxfs_get_sx_data(sxfs, &sx, &cluster)) {
         SXFS_ERROR("Cannot get SX data");
-        return NULL;
+        err = 0;
+        goto sxfs_upload_worker_err;
     }
     pthread_mutex_lock(&sxfs->upload_mutex);
     entry = upload_queue.next;

@@ -1287,8 +1287,6 @@ static int sxfs_truncate (const char *path, off_t length) {
                 }
                 free(local_file_path);
                 local_file_path = NULL;
-                if(!sxfs->args->use_queues_flag)
-                    mctime = dir->files[index]->st.st_mtime;
             }
         }
         dir->files[index]->st.st_size = length;
@@ -1878,7 +1876,7 @@ static int sxfs_fsync (const char *path, int datasync, struct fuse_file_info *fi
     pthread_mutex_unlock(&sxfs->files_mutex);
     pthread_mutex_lock(&sxfs_file->mutex);
     if(sxfs_file->flush) {
-        if((ret = sxfs_update_mtime(sxfs_file->write_path, path, sxfs_file->ls_file))) {
+        if((ret = sxfs_upload_force(sxfs_file->write_path, path, sxfs_file->ls_file))) {
             pthread_mutex_unlock(&sxfs_file->mutex);
             SXFS_ERROR("Cannot update modification time");
             return ret;

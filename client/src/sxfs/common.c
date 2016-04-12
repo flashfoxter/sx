@@ -1868,6 +1868,7 @@ static void sxfs_queue_run (sxfs_state_t *sxfs, sxfs_queue_entry_t *entry, size_
 
 static void* sxfs_delete_thread (void *ptr) {
     int *ret = (int*)calloc(1, sizeof(int)), err;
+    size_t prev;
     struct timespec wait_time;
     sxfs_state_t *sxfs = (sxfs_state_t*)ptr;
 
@@ -1909,8 +1910,12 @@ static void* sxfs_delete_thread (void *ptr) {
 sxfs_delete_thread_err:
     pthread_mutex_unlock(&sxfs->delete_thread_mutex);
     pthread_mutex_lock(&sxfs->limits_mutex);
+    prev = threads_del + 1;
     while(threads_del) {
-        SXFS_DEBUG("Waiting for workers (%llu)", (long long unsigned int)threads_del);
+        if(prev != threads_del) {
+            SXFS_DEBUG("Waiting for workers (%llu)", (long long unsigned int)threads_del);
+            prev = threads_del;
+        }
         pthread_mutex_unlock(&sxfs->limits_mutex);
         usleep(SXFS_THREAD_WAIT);
         pthread_mutex_lock(&sxfs->limits_mutex);
@@ -2532,6 +2537,7 @@ static int move_files (sxfs_state_t *sxfs, const char *source, const char *dest)
 
 static void* sxfs_upload_thread (void *ptr) {
     int *ret = (int*)calloc(1, sizeof(int)), err;
+    size_t prev;
     struct timespec wait_time;
     sxfs_state_t *sxfs = (sxfs_state_t*)ptr;
 
@@ -2574,8 +2580,12 @@ static void* sxfs_upload_thread (void *ptr) {
 sxfs_upload_thread_err:
     pthread_mutex_unlock(&sxfs->upload_thread_mutex);
     pthread_mutex_lock(&sxfs->limits_mutex);
+    prev = threads_up + 1;
     while(threads_up) {
-        SXFS_DEBUG("Waiting for workers (%llu)", (long long unsigned int)threads_up);
+        if(prev != threads_up) {
+            SXFS_DEBUG("Waiting for workers (%llu)", (long long unsigned int)threads_up);
+            prev = threads_up;
+        }
         pthread_mutex_unlock(&sxfs->limits_mutex);
         usleep(SXFS_THREAD_WAIT);
         pthread_mutex_lock(&sxfs->limits_mutex);

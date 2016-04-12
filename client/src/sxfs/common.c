@@ -1901,7 +1901,6 @@ static void* sxfs_delete_thread (void *ptr) {
                 goto sxfs_delete_thread_err;
             }
         } else {
-            SXFS_LOG("Deletion thread has been stopped");
             break;
         }
     }
@@ -1921,6 +1920,7 @@ sxfs_delete_thread_err:
     sxfs_queue_free(delete_queue.next, 1);
     delete_queue.next = NULL;
     delete_flag = SXFS_THREAD_STOPPED;
+    SXFS_LOG("Deletion thread has been stopped");
     pthread_mutex_unlock(&sxfs->delete_mutex);
     pthread_exit((void*)ret);
 } /* sxfs_delete_thread */
@@ -2565,28 +2565,6 @@ static void* sxfs_upload_thread (void *ptr) {
                 goto sxfs_upload_thread_err;
             }
         } else {
-            pthread_mutex_lock(&sxfs->upload_mutex);
-            if(upload_queue.next) { /* save not yet uploaded files */
-                SXFS_LOG("Some files from upload queue could not be uploaded and have been saved into '%s'", sxfs->lostdir);
-                sxfs_queue_entry_t *entry = upload_queue.next;
-                while(entry) {
-                    entry->waiting++;
-                    /* wait for all threads to finish */
-                    while((entry->state & SXFS_QUEUE_BUSY) || entry->waiting > 1) {
-                        pthread_mutex_unlock(&sxfs->upload_mutex);
-                        usleep(SXFS_THREAD_WAIT);
-                        pthread_mutex_lock(&sxfs->upload_mutex);
-                    }
-                    /* no 'entry->waiting--;' to prevent entries being removed */
-                    entry = entry->next;
-                }
-                if(move_files(sxfs, sxfs->tempdir, sxfs->lostdir)) { /* the queue doesn't change till the mutex unlock */
-                    SXFS_ERROR("Cannot move some files to the recovery directory. These files are available in '%s'", sxfs->tempdir);
-                    sxfs->recovery_failed = 1;
-                }
-            }
-            pthread_mutex_unlock(&sxfs->upload_mutex);
-            SXFS_LOG("Upload thread has been stopped");
             break;
         }
 
@@ -2604,9 +2582,25 @@ sxfs_upload_thread_err:
     }
     pthread_mutex_unlock(&sxfs->limits_mutex);
     pthread_mutex_lock(&sxfs->upload_mutex);
+    if(upload_queue.next) { /* check whether queue contains not yet uploaded files */
+        sxfs_queue_entry_t *entry = upload_queue.next;
+        while(entry) {
+            if(!(entry->state & SXFS_QUEUE_REMOTE)) { /* save not yet uploaded files */
+                SXFS_LOG("Some files from upload queue could not be uploaded and have been saved into '%s'", sxfs->lostdir);
+                /* no need to wait for the workers, they are already done (see 'while' loop above)) */
+                if(move_files(sxfs, sxfs->tempdir, sxfs->lostdir)) {
+                    SXFS_ERROR("Cannot move some files to the recovery directory. These files are available in '%s'", sxfs->tempdir);
+                    sxfs->recovery_failed = 1;
+                }
+                break;
+            }
+            entry = entry->next;
+        }
+    }
     sxfs_queue_free(upload_queue.next, 1);
     upload_queue.next = NULL;
     upload_flag = SXFS_THREAD_STOPPED;
+    SXFS_LOG("Upload thread has been stopped");
     pthread_mutex_unlock(&sxfs->upload_mutex);
     pthread_exit((void*)ret);
 } /* sxfs_upload_thread */

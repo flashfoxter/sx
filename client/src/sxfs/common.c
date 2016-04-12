@@ -1089,6 +1089,7 @@ int sxfs_ls_update (const char *absolute_path, sxfs_lsdir_t **given_dir) {
                         ret = -EAGAIN;
                         goto sxfs_ls_update_err;
                     }
+                    entry = entry->next;
                 } else { /* file */
                     ptr = strrchr(entry->remote_path ,'/') + 1;
                     if(!strcmp(ptr, SXFS_SXNEWDIR)) {
@@ -1105,8 +1106,8 @@ int sxfs_ls_update (const char *absolute_path, sxfs_lsdir_t **given_dir) {
                             goto sxfs_ls_update_err;
                         }
                     }
+                    entry = sxfs_queue_cleanup_single(entry, 1);
                 }
-                entry = sxfs_queue_cleanup_single(entry, 1);
             } else {
                 entry = entry->next;
             }

@@ -1140,7 +1140,7 @@ int sxfs_ls_update (const char *absolute_path, sxfs_lsdir_t **given_dir) {
         fmeta = NULL;
         if(fpath[len] != '/') {
             fmeta = sxc_filemeta_new(file);
-            if(!fmeta) {
+            if(!fmeta && sxc_geterrnum(sx) != SXE_ECOMM) { /* workaround for race condition (remote file can be deleted between listing and sxc_filemeta_new()) */
                 SXFS_ERROR("Cannot get '%s' filemeta: %s", fpath, sxc_geterrmsg(sx));
                 ret = -sxfs_sx_err(sx);
                 goto sxfs_ls_update_err;

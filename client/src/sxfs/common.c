@@ -1832,7 +1832,7 @@ sxfs_delete_worker_err:
     threads_del--;
     sxfs->threads_num--;
     pthread_mutex_unlock(&sxfs->limits_mutex);
-    return NULL;
+    pthread_exit(NULL);
 } /* sxfs_delete_worker */
 
 static void sxfs_queue_run (sxfs_state_t *sxfs, sxfs_queue_entry_t *entry, size_t *nthreads, pthread_mutex_t *mutex, void* (*thread_worker)(void*)) {
@@ -1922,7 +1922,7 @@ sxfs_delete_thread_err:
     delete_queue.next = NULL;
     delete_flag = SXFS_THREAD_STOPPED;
     pthread_mutex_unlock(&sxfs->delete_mutex);
-    return (void*)ret;
+    pthread_exit((void*)ret);
 } /* sxfs_delete_thread */
 
 int sxfs_delete_check_path (const char *path) {
@@ -2482,7 +2482,7 @@ sxfs_upload_worker_err:
     threads_up--;
     sxfs->threads_num--;
     pthread_mutex_unlock(&sxfs->limits_mutex);
-    return NULL;
+    pthread_exit(NULL);
 } /* sxfs_upload_worker */
 
 static int move_files (sxfs_state_t *sxfs, const char *source, const char *dest) {
@@ -2608,7 +2608,7 @@ sxfs_upload_thread_err:
     upload_queue.next = NULL;
     upload_flag = SXFS_THREAD_STOPPED;
     pthread_mutex_unlock(&sxfs->upload_mutex);
-    return (void*)ret;
+    pthread_exit((void*)ret);
 } /* sxfs_upload_thread */
 
 int sxfs_upload_start (void) {

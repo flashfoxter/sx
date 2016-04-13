@@ -669,6 +669,23 @@ int sxi_file_set_meta(sxc_file_t *file, sxc_meta_t *meta)
     return 0;
 }
 
+int sxi_file_meta_add (sxc_file_t *file, const char *key, const void *value, unsigned int value_len) {
+    if(!file || !key || !value)
+        return -1;
+    if(is_remote(file)) {
+        sxi_seterr(file->sx, SXE_EARG, "Called with remote file");
+        return -1;
+    }
+    if(!file->meta) {
+        file->meta = sxc_meta_new(file->sx);
+        if(!file->meta) {
+            sxi_seterr(file->sx, SXE_EMEM, "Out of memory");
+            return -1;
+        }
+    }
+    return sxc_meta_setval(file->meta, key, value, value_len);
+}
+
 sxc_file_t *sxi_file_dup(sxc_file_t *file)
 {
     sxc_file_t *ret;
@@ -5579,23 +5596,6 @@ int sxc_cat(sxc_file_t *source, int dest) {
         rc = sxc_copy_single(source, destfile, 0, 0, 0, NULL, 1);
     sxc_file_free(destfile);
     return rc;
-}
-
-int sxc_file_meta_add (sxc_file_t *file, const char *key, const void *value, unsigned int value_len) {
-    if(!file || !key || !value)
-        return -1;
-    if(is_remote(file)) {
-        sxi_seterr(file->sx, SXE_EARG, "Called with remote file");
-        return -1;
-    }
-    if(!file->meta) {
-        file->meta = sxc_meta_new(file->sx);
-        if(!file->meta) {
-            sxi_seterr(file->sx, SXE_EMEM, "Out of memory");
-            return -1;
-        }
-    }
-    return sxc_meta_setval(file->meta, key, value, value_len);
 }
 
 

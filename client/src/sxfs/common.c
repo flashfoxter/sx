@@ -1417,7 +1417,7 @@ int sxfs_upload_force (const char *local_file_path, const char *remote_file_path
     if(lsfile) {
         uint64_t mtime = lsfile->st.st_mtime;
         mtime = sxi_swapu64(mtime);
-        if(sxc_file_meta_add(file_local, "sxfsMtime", &mtime, sizeof(mtime))) {
+        if(sxi_file_meta_add(file_local, "sxfsMtime", &mtime, sizeof(mtime))) {
             SXFS_ERROR("Cannot add filemeta entry: %s", sxc_geterrmsg(sx));
             ret = -sxfs_sx_err(sx);
             goto sxfs_upload_force_err;
@@ -2453,7 +2453,7 @@ static void* sxfs_upload_worker (void *ctx) {
                 goto sxfs_upload_worker_err;
             }
             pthread_mutex_unlock(&sxfs->upload_mutex);
-            if(sxc_file_meta_add(src, "sxfsMtime", &entry->mtime, sizeof(entry->mtime))) {
+            if(sxi_file_meta_add(src, "sxfsMtime", &entry->mtime, sizeof(entry->mtime))) {
                 SXFS_ERROR("Cannot add filemeta entry: %s", sxc_geterrmsg(sx));
                 err = 1;
                 goto sxfs_upload_worker_err;

@@ -50,6 +50,7 @@
 #define SXFS_THREAD_STOPPED (-1)
 
 #define SXFS_QUEUE_THREADS_LIMIT 5
+#define SXFS_DELETE_WORKER_NFILES 10
 
 #define SXFS_QUEUE_IDLE 0x0
 #define SXFS_QUEUE_DONE 0x1
@@ -1743,14 +1744,14 @@ sxfs_delete_err:
 } /* sxfs_delete */
 
 static void* sxfs_delete_worker (void *ctx) {
-    int err;
+    int err, i, nfiles = 0;
     char *path = NULL;
     sxc_client_t *sx;
     sxc_cluster_t *cluster;
     sxc_file_t *file = NULL;
     sxc_file_list_t *flist = NULL;
     sxfs_state_t *sxfs = (sxfs_state_t*)ctx;
-    sxfs_queue_entry_t *entry;
+    sxfs_queue_entry_t *entry, *list[SXFS_DELETE_WORKER_NFILES];
 
     if(sxfs_get_sx_data(sxfs, &sx, &cluster)) {
         SXFS_ERROR("Cannot get SX data");
@@ -1769,7 +1770,15 @@ static void* sxfs_delete_worker (void *ctx) {
             entry->state |= SXFS_QUEUE_IN_PROGRESS;
             pthread_mutex_unlock(&sxfs->delete_mutex);
 
-            SXFS_DEBUG("Removing '%s' %s", entry->remote_path, entry->remote_path[strlen(entry->remote_path)-1] == '/' ? "directory" : "file");
+            if(!nfiles) {
+                sxc_file_list_free(flist);
+                flist = sxc_file_list_new(sx, 1, 0);
+                if(!flist) {
+                    SXFS_ERROR("Cannot create new file list: %s", sxc_geterrmsg(sx));
+                    err = 1;
+                    goto sxfs_delete_worker_err;
+                }
+            }
             free(path);
             path = parse_path(entry->remote_path);
             if(!path) {
@@ -1784,33 +1793,42 @@ static void* sxfs_delete_worker (void *ctx) {
                 err = 1;
                 goto sxfs_delete_worker_err;
             }
-            sxc_file_list_free(flist);
-            flist = sxc_file_list_new(sx, entry->remote_path[strlen(entry->remote_path)-1] == '/', 0);
-            if(!flist) {
-                SXFS_ERROR("Cannot create new file list: %s", sxc_geterrmsg(sx));
-                err = 1;
-                goto sxfs_delete_worker_err;
-            }
             if((err = sxc_file_list_add(flist, file, 1))) {
                 SXFS_ERROR("Cannot add file: %s", sxc_geterrmsg(sx));
                 goto sxfs_delete_worker_err;
             }
             file = NULL;
-            if((err = sxc_rm(flist, 0))) {
-                if(sxc_geterrnum(sx) == SXE_EARG) {
-                    SXFS_DEBUG("No such a remote file: %s", entry->remote_path);
-                    err = 0;
-                } else {
-                    SXFS_ERROR("Cannot remove '%s': %s", entry->remote_path, sxc_geterrmsg(sx));
+            list[nfiles] = entry;
+            nfiles++;
+            if(nfiles == SXFS_DELETE_WORKER_NFILES || !entry->next) {
+                for(i=0; i<nfiles; i++) {
+                    entry = list[i];
+                    SXFS_DEBUG("Removing '%s' %s", entry->remote_path, entry->remote_path[strlen(entry->remote_path)-1] == '/' ? "directory" : "file");
                 }
+                if((err = sxc_rm(flist, 0))) {
+                    if(sxc_geterrnum(sx) == SXE_EARG) {
+                        SXFS_DEBUG("No such a remote file: %s", entry->remote_path);
+                        err = 0;
+                    } else {
+                        SXFS_ERROR("Cannot remove '%s': %s", entry->remote_path, sxc_geterrmsg(sx));
+                    }
+                } else {
+                    SXFS_DEBUG("%d %s removed correctly", nfiles, nfiles == 1 ? (list[0]->remote_path[strlen(list[0]->remote_path)-1] == '/' ? "directory" : "file") : "files");
+                }
+                pthread_mutex_lock(&sxfs->delete_mutex);
+                for(i=0; i<nfiles; i++) {
+                    entry = list[i];
+                    entry->state &= ~SXFS_QUEUE_IN_PROGRESS;
+                    if(!err)
+                        entry->state |= SXFS_QUEUE_DONE;
+                    sxfs_queue_cleanup_single(entry, 1);
+                }
+                nfiles = 0;
+                entry = delete_queue.next; /* process whole queue again (possibly process skipped directories) */
             } else {
-                SXFS_DEBUG("'%s' removed correctly", entry->remote_path);
+                pthread_mutex_lock(&sxfs->delete_mutex);
+                entry = entry->next;
             }
-            pthread_mutex_lock(&sxfs->delete_mutex);
-            entry->state &= ~SXFS_QUEUE_IN_PROGRESS;
-            if(!err)
-                entry->state |= SXFS_QUEUE_DONE;
-            entry = sxfs_queue_cleanup_single(entry, 1);
         } else {
             entry = entry->next;
         }

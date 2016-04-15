@@ -368,10 +368,15 @@ sxi_query_t *sxi_userdel_proto(sxc_client_t *sx, const char *username, const cha
     return ret;
 }
 
-sxi_query_t *sxi_volumeadd_proto(sxc_client_t *sx, const char *volname, const char *owner, int64_t size, unsigned int replica, unsigned int revisions, sxc_meta_t *metadata) {
+sxi_query_t *sxi_volumeadd_proto(sxc_client_t *sx, const char *volname, const char *owner, int64_t size, unsigned int replica, unsigned int revisions, sxc_meta_t *metadata, const void *global_id, unsigned int global_id_len) {
     unsigned int tlen;
     char *url, *qowner;
     sxi_query_t *ret;
+
+    if(global_id && global_id_len != SXI_SHA1_BIN_LEN) {
+        sxi_seterr(sx, SXE_EARG, "Invalid argument");
+        return NULL;
+    }
 
     url = sxi_urlencode(sx, volname, 0);
     if(!url)
@@ -392,6 +397,11 @@ sxi_query_t *sxi_volumeadd_proto(sxc_client_t *sx, const char *volname, const ch
                                    (long long)size, qowner, replica, revisions);
     }
     free(qowner);
+    if(ret && global_id) {
+        char hexid[SXI_SHA1_TEXT_LEN+1];
+        sxi_bin2hex(global_id, global_id_len, hexid);
+        ret = sxi_query_append_fmt(sx, ret, lenof(",\"global_id\":\"\"") + 2 * SXI_SHA1_TEXT_LEN + 1, ",\"global_id\":\"%s\"", hexid);
+    }
     return sxi_query_add_meta(sx, ret, "volumeMeta", metadata, 1, 0);
 }
 
@@ -970,13 +980,13 @@ sxi_query_t *sxi_volsizes_proto_end(sxc_client_t *sx, sxi_query_t *query) {
     return sxi_query_append_fmt(sx, query, 2, "}");
 }
 
-sxi_query_t *sxi_volume_mod_proto(sxc_client_t *sx, const char *volume, const char *newowner, int64_t newsize, int max_revs, sxc_meta_t *meta) {
+sxi_query_t *sxi_volume_mod_proto(sxc_client_t *sx, const char *volume, const char *newname, const char *newowner, int64_t newsize, int max_revs, sxc_meta_t *meta) {
     sxi_query_t *query = NULL, *ret = NULL;
-    char *enc_vol = NULL, *enc_owner = NULL, *path = NULL;
+    char *enc_vol = NULL, *enc_name = NULL, *enc_owner = NULL, *path = NULL;
     unsigned int len;
     int comma = 0;
 
-    if(!volume || (!newowner && newsize < 0 && max_revs < 0 && !meta)) {
+    if(!volume || (!newname && !newowner && newsize < 0 && max_revs < 0 && !meta)) {
         SXDEBUG("Invalid argument");
         return NULL;
     }
@@ -1006,6 +1016,20 @@ sxi_query_t *sxi_volume_mod_proto(sxc_client_t *sx, const char *volume, const ch
         goto sxi_volume_mod_proto_err;
     }
 
+    if(newname) {
+        enc_name = sxi_json_quote_string(newname);
+        if(!enc_name) {
+            SXDEBUG("Failed to encode new volume name");
+            goto sxi_volume_mod_proto_err;
+        }
+        query = sxi_query_append_fmt(sx, query, strlen("\"name\":\"\"") + strlen(enc_name) + 1, "\"name\":%s", enc_name);
+        if(!query) {
+            SXDEBUG("Failed to append name field to query JSON");
+            goto sxi_volume_mod_proto_err;
+        }
+        comma = 1;
+    }
+
     if(newowner) {
         enc_owner = sxi_json_quote_string(newowner);
         if(!enc_owner) {
@@ -1013,7 +1037,7 @@ sxi_query_t *sxi_volume_mod_proto(sxc_client_t *sx, const char *volume, const ch
             goto sxi_volume_mod_proto_err;
         }
 
-        query = sxi_query_append_fmt(sx, query, strlen("\"owner\":\"\"") + strlen(enc_owner) + 1, "\"owner\":%s", enc_owner);
+        query = sxi_query_append_fmt(sx, query, strlen("\"owner\":\"\"") + strlen(enc_owner) + 1 + comma, "%s\"owner\":%s", (comma ? "," : ""), enc_owner);
         if(!query) {
             SXDEBUG("Failed to append owner field to query JSON");
             goto sxi_volume_mod_proto_err;
@@ -1057,6 +1081,7 @@ sxi_query_t *sxi_volume_mod_proto(sxc_client_t *sx, const char *volume, const ch
 sxi_volume_mod_proto_err:
     free(enc_vol);
     free(enc_owner);
+    free(enc_name);
     free(path);
     if(!ret) /* If failed, do not return incomplete query */
         sxi_query_free(query);

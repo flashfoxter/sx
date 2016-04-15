@@ -12,6 +12,8 @@ option  "size"      s "Set a new size of the volume (allows K,M,G,T suffixes)" s
 
 option  "max-revisions"      m "Set a new revisions limit for files in the volume" int optional
 
+option  "name"      n "Rename the volume" string optional typestr="NAME"
+
 option  "reset-custom-meta"    - "Reset custom metadata assigned to the volume" flag off
 
 text "\nAdditional options:\n"

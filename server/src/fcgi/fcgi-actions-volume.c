@@ -40,7 +40,7 @@
 #include <fnmatch.h>
 
 #include "libsxclient/src/jparse.h"
-
+#include "libsxclient/src/vcrypto.h"
 
 static rc_ty int64_arg(const char* arg, int64_t *v, int64_t defaultv)
 {
@@ -713,9 +713,11 @@ void fcgi_acl_volume(void) {
     free(actx.ops);
 }
 
-/* {"volumeSize":123, "replicaCount":2, "volumeMeta":{"metaKey":"hex(value)"}, "user":"jack", "maxRevisions":5} */
+/* {"volumeSize":123, "replicaCount":2, "volumeMeta":{"metaKey":"hex(value)"}, "user":"jack", "maxRevisions":5, "global_id":"aabb...1122"} */
 struct cb_volnew_ctx {
     sx_blob_t *metablb;
+    sx_hash_t global_id;
+    int has_global_id;
     int64_t volsize;
     int replica, oom;
     unsigned int nmeta, revisions;
@@ -786,6 +788,16 @@ static void cb_volnew_meta(jparse_t *J, void *ctx, const char *string, unsigned 
     c->nmeta++;
 }
 
+static void cb_volnew_global_id(jparse_t *J, void *ctx, const char *string, unsigned int length) {
+    struct cb_volnew_ctx *c = ctx;
+    if(length != sizeof(c->global_id.b) * 2 || hex2bin(string, length, c->global_id.b, sizeof(c->global_id.b))) {
+        sxi_jparse_cancel(J, "Invalid volume owner");
+        return;
+    }
+    c->has_global_id = 1;
+}
+
+#define VOLID_MAX_TRIES 10
 void fcgi_create_volume(void) {
     const struct jparse_actions acts = {
 	JPACTS_INT64(
@@ -797,13 +809,15 @@ void fcgi_create_volume(void) {
 		     ),
 	JPACTS_STRING(
 		      JPACT(cb_volnew_meta, JPKEY("volumeMeta"), JPANYKEY),
-		      JPACT(cb_volnew_owner, JPKEY("owner"))
+		      JPACT(cb_volnew_owner, JPKEY("owner")),
+                      JPACT(cb_volnew_global_id, JPKEY("global_id"))
 		      )
     };
     struct cb_volnew_ctx yctx;
     jparse_t *J;
     int len;
     rc_ty s;
+    int64_t owner_uid;
 
     if(sx_hashfs_check_volume_name(volume))
 	quit_errmsg(400, "Bad volume name");
@@ -818,6 +832,7 @@ void fcgi_create_volume(void) {
     yctx.owner[0] = '\0';
     yctx.nmeta = 0;
     yctx.oom = 0;
+    yctx.has_global_id = 0;
     yctx.metablb = sx_blob_new();
     if(!yctx.metablb) {
 	sxi_jparse_destroy(J);
@@ -854,7 +869,6 @@ void fcgi_create_volume(void) {
 	quit_errmsg(400, "Invalid volume owner: invalid username");
     }
 
-    int64_t owner_uid;
     if(sx_hashfs_get_uid(hashfs, yctx.owner, &owner_uid)) {
 	sx_blob_free(yctx.metablb);
 	quit_errmsg(400, "Invalid volume owner: user does not exist");
@@ -868,6 +882,11 @@ void fcgi_create_volume(void) {
 
     if(has_priv(PRIV_CLUSTER)) {
 	/* Request comes in from the cluster: apply locally */
+        if(!yctx.has_global_id) {
+            sx_blob_free(yctx.metablb);
+            quit_errmsg(400, "Global volume ID has not been provided");
+        }
+
 	sx_hashfs_volume_new_begin(hashfs);
 	sx_blob_loadpos(yctx.metablb);
 	while(yctx.nmeta--) {
@@ -889,7 +908,7 @@ void fcgi_create_volume(void) {
 	    }
 	}
 
-	s = sx_hashfs_volume_new_finish(hashfs, volume, yctx.volsize, yctx.replica, yctx.revisions, owner_uid, 1);
+	s = sx_hashfs_volume_new_finish(hashfs, volume, &yctx.global_id, yctx.volsize, yctx.replica, yctx.revisions, owner_uid, 1);
 	sx_blob_free(yctx.metablb);
 
 	switch (s) {
@@ -918,6 +937,37 @@ void fcgi_create_volume(void) {
 	int extra_job_timeout = 50 * (sx_nodelist_count(allnodes)-1);
 	job_t job;
 	rc_ty res;
+        unsigned int i = 0;
+
+        if(yctx.has_global_id) {
+            sx_blob_free(yctx.metablb);
+            quit_errmsg(400, "Global volume ID cannot be provided with a user request");
+        }
+
+        /* Generate a volume ID for the new volume */
+        while(i < VOLID_MAX_TRIES) {
+            const sx_hashfs_volume_t *vol = NULL;
+
+            if(sxi_rand_bytes(yctx.global_id.b, sizeof(yctx.global_id.b))) {
+                sx_blob_free(yctx.metablb);
+                quit_errmsg(500, "Failed to generate global volume ID");
+            }
+
+            s = sx_hashfs_volume_by_global_id(hashfs, &yctx.global_id, &vol);
+            if(s == OK) /* Found a volume with the randomized ID, generate a new ID */
+                continue;
+            else if(s != ENOENT) {
+                sx_blob_free(yctx.metablb);
+                quit_errmsg(rc2http(s), msg_get_reason());
+            } else
+                break; /* Found a good candidate */
+            i++;
+        }
+
+        if(i >= VOLID_MAX_TRIES) {
+           sx_blob_free(yctx.metablb);
+           quit_errmsg(500, "Failed to generate global volume ID");
+        }
 
         res = sx_hashfs_check_volume_settings(hashfs, volume, yctx.volsize, -1, yctx.replica, yctx.revisions);
         if(res != OK) {
@@ -933,6 +983,7 @@ void fcgi_create_volume(void) {
 	    quit_errmsg(500, "Cannot allocate job blob");
 	}
 	if(sx_blob_add_string(joblb, volume) ||
+           sx_blob_add_blob(joblb, yctx.global_id.b, sizeof(yctx.global_id.b)) ||
 	   sx_blob_add_string(joblb, yctx.owner) ||
 	   sx_blob_add_int64(joblb, yctx.volsize) ||
 	   sx_blob_add_int32(joblb, yctx.replica) ||
@@ -1172,9 +1223,11 @@ void fcgi_volsizes(void) {
     free(yctx.vols);
 }
 
-/* {"owner":"alice","size":1000000000,"maxRevisions":10,"customVolumeMeta":{"customMeta1":"aabbcc"}} */
+/* {"owner":"alice","size":1000000000,"maxRevisions":10,"customVolumeMeta":{"customMeta1":"aabbcc"},"name":"newvolumename"} */
 struct volmod_ctx {
     const char *volume;
+    char oldname[SXLIMIT_MAX_VOLNAME_LEN+1];
+    char newname[SXLIMIT_MAX_VOLNAME_LEN+1];
     char oldowner[SXLIMIT_MAX_USERNAME_LEN+1];
     char newowner[SXLIMIT_MAX_USERNAME_LEN+1];
     int64_t oldsize;
@@ -1188,6 +1241,8 @@ struct volmod_ctx {
 };
 
 static void volmod_ctx_init(struct volmod_ctx *ctx) {
+    ctx->oldname[0] = '\0';
+    ctx->newname[0] = '\0';
     ctx->oldowner[0] = '\0';
     ctx->newowner[0] = '\0';
     ctx->newsize = -1;
@@ -1220,19 +1275,31 @@ static rc_ty volmod_nodes(sx_hashfs_t *h, sx_blob_t *blob, sx_nodelist_t **nodes
 }
 
 static int blob_to_volmod(sxc_client_t *sx, sx_blob_t *b, struct volmod_ctx *ctx) {
+    const char *oldname = NULL, *newname = NULL;
     const char *oldowner = NULL, *newowner = NULL;
 
     if(!b || !ctx)
         return 1;
     volmod_ctx_init(ctx);
 
-    if(sx_blob_get_string(b, &ctx->volume) || sx_blob_get_string(b, &oldowner)
+    if(sx_blob_get_string(b, &ctx->volume) || sx_blob_get_string(b, &oldname)
+       || sx_blob_get_string(b, &newname) || sx_blob_get_string(b, &oldowner)
        || sx_blob_get_string(b, &newowner) || sx_blob_get_int64(b, &ctx->oldsize)
        || sx_blob_get_int64(b, &ctx->newsize) || sx_blob_get_int32(b, &ctx->oldrevs)
        || sx_blob_get_int32(b, &ctx->newrevs)) {
         WARN("Corrupted volume mod blob");
         return 1;
     }
+
+    if(oldname && *oldname)
+        snprintf(ctx->oldname, SXLIMIT_MAX_VOLNAME_LEN+1, "%s", oldname);
+    else
+        ctx->oldname[0] = '\0';
+
+    if(newname && *newname)
+        snprintf(ctx->newname, SXLIMIT_MAX_VOLNAME_LEN+1, "%s", newname);
+    else
+        ctx->newname[0] = '\0';
 
     if(oldowner && *oldowner)
         snprintf(ctx->oldowner, SXLIMIT_MAX_USERNAME_LEN+1, "%s", oldowner);
@@ -1256,7 +1323,8 @@ static int volmod_to_blob(sxc_client_t *sx, int nodes, void *yctx, sx_blob_t *jo
         return -1;
     }
 
-    if(sx_blob_add_string(joblb, ctx->volume) || sx_blob_add_string(joblb, ctx->oldowner)
+    if(sx_blob_add_string(joblb, ctx->volume) || sx_blob_add_string(joblb, ctx->oldname)
+        || sx_blob_add_string(joblb, ctx->newname) || sx_blob_add_string(joblb, ctx->oldowner)
         || sx_blob_add_string(joblb, ctx->newowner) || sx_blob_add_int64(joblb, ctx->oldsize)
         || sx_blob_add_int64(joblb, ctx->newsize) || sx_blob_add_int32(joblb, ctx->oldrevs)
         || sx_blob_add_int32(joblb, ctx->newrevs) || sx_blob_add_int32(joblb, ctx->nmeta)) {
@@ -1314,11 +1382,14 @@ static sxi_query_t* volmod_proto_from_blob(sxc_client_t *sx, sx_blob_t *b, jobph
     /* In COMMIT phase meta contains new metadata, in ABORT or UNDO it contains old, backed up metadata */
     switch (phase) {
         case JOBPHASE_COMMIT:
-            ret = sxi_volume_mod_proto(sx, ctx.volume, ctx.newowner, ctx.newsize, ctx.newrevs, meta);
+            ret = sxi_volume_mod_proto(sx, ctx.volume, ctx.newname, ctx.newowner, ctx.newsize, ctx.newrevs, meta);
             break;
         case JOBPHASE_ABORT:
         case JOBPHASE_UNDO:
-            ret = sxi_volume_mod_proto(sx, ctx.volume, ctx.oldowner, ctx.oldsize, ctx.oldrevs, meta);
+            if(*ctx.newname) /* Use ctx.newname as the volume name for the modification proto in case the volume is being renamed */
+                ret = sxi_volume_mod_proto(sx, ctx.newname, ctx.oldname, ctx.oldowner, ctx.oldsize, ctx.oldrevs, meta);
+            else
+                ret = sxi_volume_mod_proto(sx, ctx.volume, ctx.oldname, ctx.oldowner, ctx.oldsize, ctx.oldrevs, meta);
             break;
         default:
             ret = NULL;
@@ -1464,7 +1535,7 @@ static rc_ty volmod_execute_blob(sx_hashfs_t *h, sx_blob_t *b, jobphase_t phase,
 
     switch (phase) {
         case JOBPHASE_COMMIT:
-            rc = sx_hashfs_volume_mod(h, ctx.volume, ctx.newowner, ctx.newsize, ctx.newrevs, change_meta);
+            rc = sx_hashfs_volume_mod(h, ctx.volume, ctx.newname, ctx.newowner, ctx.newsize, ctx.newrevs, change_meta);
             if (rc != OK)
                 WARN("Failed to change volume %s: %s", ctx.volume, msg_get_reason());
             if(rc == OK && ctx.newrevs < ctx.oldrevs) {
@@ -1476,13 +1547,19 @@ static rc_ty volmod_execute_blob(sx_hashfs_t *h, sx_blob_t *b, jobphase_t phase,
             }
             return rc;
         case JOBPHASE_ABORT:
-            rc = sx_hashfs_volume_mod(h, ctx.volume, ctx.oldowner, ctx.oldsize, ctx.oldrevs, change_meta);
+            if(*ctx.newname)
+                rc = sx_hashfs_volume_mod(h, ctx.newname, ctx.oldname, ctx.oldowner, ctx.oldsize, ctx.oldrevs, change_meta);
+            else
+                rc = sx_hashfs_volume_mod(h, ctx.volume, ctx.oldname, ctx.oldowner, ctx.oldsize, ctx.oldrevs, change_meta);
             if (rc != OK)
                 WARN("Failed to change volume %s: %s", ctx.volume, msg_get_reason());
             return rc;
         case JOBPHASE_UNDO:
             CRIT("volume '%s' may have been left in an inconsistent state after a failed modification attempt", ctx.volume);
-            rc = sx_hashfs_volume_mod(h, ctx.volume, ctx.oldowner, ctx.oldsize, ctx.oldrevs, change_meta);
+            if(*ctx.newname)
+                rc = sx_hashfs_volume_mod(h, ctx.newname, ctx.oldname, ctx.oldowner, ctx.oldsize, ctx.oldrevs, change_meta);
+            else
+                rc = sx_hashfs_volume_mod(h, ctx.volume, ctx.oldname, ctx.oldowner, ctx.oldsize, ctx.oldrevs, change_meta);
             if (rc != OK)
                 WARN("Failed to change volume %s: %s", ctx.volume, msg_get_reason());
             return rc;
@@ -1501,7 +1578,7 @@ static rc_ty volmod_parse_complete(void *yctx)
     if (!ctx)
         return EINVAL;
 
-    if((*ctx->newowner || ctx->newsize != -1) && !has_priv(PRIV_ADMIN)) {
+    if((*ctx->newname || *ctx->newowner || ctx->newsize != -1) && !has_priv(PRIV_ADMIN)) {
         msg_set_reason("Permission denied: Not enough privileges");
         return EPERM;
     } else if(ctx->newrevs != -1 && !has_priv(PRIV_OWNER)) {
@@ -1512,11 +1589,52 @@ static rc_ty volmod_parse_complete(void *yctx)
         return EPERM;
     }
 
+    /* Preliminary checks for a volume rename
+     *
+     * Check if there won't be a name collision after renaming volume to
+     * a new name. This check has to be run first because the static storage in sx_hashfs_volume_t
+     * will be overwritten by sx_hashfs_volume_by_name. */
+    if(*ctx->newname) {
+        /* Avoid modifications for the same name provided */
+        if(!strcmp(ctx->oldname, ctx->newname)) {
+            *ctx->oldname = '\0';
+            *ctx->newname = '\0';
+        } else {
+            s = sx_hashfs_volume_by_name(hashfs, ctx->newname, &vol);
+            if(s == OK) {
+                msg_set_reason("Volume already exists");
+                return EEXIST;
+            } else if(s != ENOENT) {
+                WARN("Failed to check volume existence");
+                msg_set_reason("Failed to check volume existence");
+                return s;
+            }
+
+            /* Rebalance and faulty node replacement jobs require files synchronization which could
+             * encounter unexpected 'Not found' issues if the volume was renamed in the middle of the process. */
+            if(sx_hashfs_is_rebalancing(hashfs)) {
+                msg_set_reason("The cluster is being rebalanced");
+                return EINVAL;
+            }
+
+            if(sx_nodelist_count(sx_hashfs_faulty_nodes(hashfs))) {
+                msg_set_reason("The cluster contains faulty nodes which are still being replaced");
+                return EINVAL;
+            }
+        }
+    }
+
     /* Check if volume exists */
     if(sx_hashfs_volume_by_name(hashfs, volume, &vol) != OK) {
         WARN("Volume does not exist");
         msg_set_reason("Volume does not exist");
         return ENOENT;
+    }
+
+    /* Reject renaming volume while changing its replica */
+    if(*ctx->newname && vol->prev_max_replica != vol->max_replica) {
+        msg_set_reason("The volume is undergoing replica change");
+        return EINVAL;
     }
 
     /* Preliminary checks for ownership change */
@@ -1617,6 +1735,17 @@ static rc_ty volmod_parse_complete(void *yctx)
 }
 
 
+static void cb_volmod_name(jparse_t *J, void *ctx, const char *string, unsigned int length) {
+    struct volmod_ctx *c = (struct volmod_ctx *)ctx;
+    if(length < SXLIMIT_MIN_VOLNAME_LEN || length > SXLIMIT_MAX_VOLNAME_LEN) {
+        sxi_jparse_cancel(J, "Invalid volume name");
+        return;
+    }
+    memcpy(c->newname, string, length);
+    c->newname[length] = '\0';
+    sxi_strlcpy(c->oldname, c->volume, sizeof(c->oldname));
+}
+
 static void cb_volmod_owner(jparse_t *J, void *ctx, const char *string, unsigned int length) {
     struct volmod_ctx *c = (struct volmod_ctx *)ctx;
     if(length > SXLIMIT_MAX_USERNAME_LEN) {
@@ -1692,6 +1821,7 @@ static void cb_volmod_revs(jparse_t *J, void *ctx, int32_t num) {
 
 const struct jparse_actions volmod_acts = {
     JPACTS_STRING(
+                  JPACT(cb_volmod_name, JPKEY("name")),
 		  JPACT(cb_volmod_owner, JPKEY("owner")),
 		  JPACT(cb_volmod_meta, JPKEY("customVolumeMeta"), JPANYKEY)
 		  ),

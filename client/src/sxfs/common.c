@@ -2360,7 +2360,7 @@ int sxfs_upload (const char *src, const char *dest, sxfs_lsfile_t *lsfile, int f
             new_entry->local_path = path;
         }
 
-        if(sxfs->attribs) {
+        if(lsfile && sxfs->attribs) {
             char *ptr = strrchr(new_entry->remote_path, '/');
             struct stat st;
 

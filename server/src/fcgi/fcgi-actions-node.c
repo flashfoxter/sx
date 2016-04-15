@@ -1181,7 +1181,7 @@ static void cb_syncvol_create(jparse_t *J, void *ctx) {
 	sxi_jparse_cancel(J, "Failed to create volume '%s': %s", name, msg_get_reason());
 	return;
     }
-    if(sx_hashfs_volume_enable(hashfs, name)) {
+    if(sx_hashfs_volume_enable(hashfs, &c->global_vol_id)) {
 	sxi_jparse_cancel(J, "Failed to enable volume '%s': %s", name, msg_get_reason());
 	return;
     }
@@ -1192,6 +1192,7 @@ static void cb_syncperms(jparse_t *J, void *ctx, int32_t perm) {
     const char *volume = sxi_jpath_mapkey(sxi_jpath_down(sxi_jparse_whereami(J)));
     const char *userhex = sxi_jpath_mapkey(sxi_jpath_down(sxi_jpath_down(sxi_jparse_whereami(J))));
     uint8_t usrid[AUTH_UID_LEN];
+    const sx_hashfs_volume_t *vol = NULL;
     sx_uid_t uid;
 
     if(!volume || !userhex) {
@@ -1212,8 +1213,13 @@ static void cb_syncperms(jparse_t *J, void *ctx, int32_t perm) {
 	sxi_jparse_cancel(J, "Lookup failed for userid(hex) '%s': %s", userhex, msg_get_reason());
 	return;
     }
-    sx_hashfs_revoke(hashfs, uid, volume, ALL_USER_PRIVS);
-    if(sx_hashfs_grant(hashfs, uid, volume, perm)) {
+    /* TODO: If the global volume ID was sent instead of volume name it would not be needed to load the volume. */
+    if(sx_hashfs_volume_by_name(hashfs, volume, &vol)) {
+        sxi_jparse_cancel(J, "Failed to get volume %s", volume);
+        return;
+    }
+    sx_hashfs_revoke(hashfs, uid, &vol->global_id, ALL_USER_PRIVS);
+    if(sx_hashfs_grant(hashfs, uid, &vol->global_id, perm)) {
 	sxi_jparse_cancel(J, "Failed to grant %d to userid(hex) '%s' on volume '%s': %s", perm, userhex, volume, msg_get_reason());
 	return;
     }

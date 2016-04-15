@@ -208,8 +208,8 @@ int sx_hashfs_blob_to_sxc_meta(sxc_client_t *sx, sx_blob_t *b, sxc_meta_t **meta
 
 #define CLUSTER_USER (const uint8_t*)"\x08\xb5\x12\x4c\x44\x7f\x00\xb2\xcd\x38\x31\x3f\x44\xe3\x93\xfd\x44\x84\x47"
 #define ADMIN_USER (const uint8_t*)"\xd0\x33\xe2\x2a\xe3\x48\xae\xb5\x66\x0f\xc2\x14\x0a\xec\x35\x85\x0c\x4d\xa9\x97"
-rc_ty sx_hashfs_grant(sx_hashfs_t *h, uint64_t uid, const char *volume, int priv);
-rc_ty sx_hashfs_revoke(sx_hashfs_t *h, uint64_t uid, const char *volume, int priv);
+rc_ty sx_hashfs_grant(sx_hashfs_t *h, uint64_t uid, const sx_hash_t *global_vol_id, int priv);
+rc_ty sx_hashfs_revoke(sx_hashfs_t *h, uint64_t uid, const sx_hash_t *global_vol_id, int priv);
 
 #define ROLE_USER 0
 #define ROLE_ADMIN 1
@@ -222,9 +222,9 @@ rc_ty sx_hashfs_volume_new_finish(sx_hashfs_t *h, const char *volume, const sx_h
  *  - EFAULT
  *  - EINVAL
  */
-rc_ty sx_hashfs_volume_enable(sx_hashfs_t *h, const char *volume);
-rc_ty sx_hashfs_volume_disable(sx_hashfs_t *h, const char *volume);
-rc_ty sx_hashfs_volume_delete(sx_hashfs_t *h, const char *volume, int force);
+rc_ty sx_hashfs_volume_enable(sx_hashfs_t *h, const sx_hash_t *global_id);
+rc_ty sx_hashfs_volume_disable(sx_hashfs_t *h, const sx_hash_t *global_id);
+rc_ty sx_hashfs_volume_delete(sx_hashfs_t *h, const sx_hash_t *global_id, int force);
 typedef struct _sx_hashfs_volume_t {
     int64_t id;
     int64_t size;
@@ -287,7 +287,7 @@ int sx_hashfs_is_node_ignored(sx_hashfs_t *h, const sx_uuid_t *node_uuid);
 rc_ty sx_hashfs_set_unfaulty(sx_hashfs_t *h, const sx_uuid_t *nodeid, int64_t dist_rev);
 
 /* Change volume ownership and/or size*/
-rc_ty sx_hashfs_volume_mod(sx_hashfs_t *h, const char *volume, const char *newname, const char *newowner, int64_t newsize, int max_revs, int modify_meta);
+rc_ty sx_hashfs_volume_mod(sx_hashfs_t *h, const sx_hashfs_volume_t *vol, const char *newname, const char *newowner, int64_t newsize, int max_revs, int modify_meta);
 rc_ty sx_hashfs_volume_mod_begin(sx_hashfs_t *h, const sx_hashfs_volume_t *vol);
 rc_ty sx_hashfs_volume_mod_addmeta(sx_hashfs_t *h, const char *key, const void *value, unsigned int value_len);
 
@@ -360,7 +360,7 @@ rc_ty sx_hashfs_putfile_gettoken(sx_hashfs_t *h, const uint8_t *user, int64_t si
 rc_ty sx_hashfs_putfile_getblock(sx_hashfs_t *h);
 void sx_hashfs_putfile_end(sx_hashfs_t *h);
 rc_ty sx_hashfs_createfile_begin(sx_hashfs_t *h);
-rc_ty sx_hashfs_createfile_commit(sx_hashfs_t *h, const char *volume, const char *name, const char *revision, const sx_hash_t *revision_id, int64_t size, int allow_over_replica);
+rc_ty sx_hashfs_createfile_commit(sx_hashfs_t *h, const sx_hashfs_volume_t *vol, const char *name, const char *revision, const sx_hash_t *revision_id, int64_t size, int allow_over_replica);
 void sx_hashfs_createfile_end(sx_hashfs_t *h);
 
 rc_ty sx_hashfs_make_token(sx_hashfs_t *h, const uint8_t *user, const char *rndhex, unsigned int replica, int64_t expires_at, const char **token);
@@ -420,6 +420,7 @@ typedef enum {
 
 rc_ty sx_hashfs_get_user_info(sx_hashfs_t *h, const uint8_t *user, sx_uid_t *uid, uint8_t *key, sx_priv_t *basepriv, char **desc, int64_t *quota);
 rc_ty sx_hashfs_get_access(sx_hashfs_t *h, const uint8_t *user, const char *volume, sx_priv_t *access);
+rc_ty sx_hashfs_get_access_by_global_id(sx_hashfs_t *h, const uint8_t *user, const sx_hash_t *global_vol_id, sx_priv_t *access);
 
 /* Jobs */
 #define JOB_NO_EXPIRY (60 * 365 * 24 * 60 * 60)

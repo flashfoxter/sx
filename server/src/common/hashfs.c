@@ -79,7 +79,8 @@
 #define HASHFS_VERSION_2_1 MAKE_HASHFS_VER(2,1)
 #define HASHFS_VERSION_2_1_3 MAKE_HASHFS_MICROVER(2,1,3)
 #define HASHFS_VERSION_2_1_4 MAKE_HASHFS_MICROVER(2,1,4)
-#define HASHFS_VERSION_2_1_5 HASHFS_VERSION_CURRENT
+#define HASHFS_VERSION_2_1_5 MAKE_HASHFS_MICROVER(2,1,5)
+#define HASHFS_VERSION_2_1_6 HASHFS_VERSION_CURRENT
 
 #define HASHFS_VERSION_INITIAL HASHFS_VERSION_1_0
 #ifdef SRC_MICRO_VERSION
@@ -899,6 +900,7 @@ struct _sx_hashfs_t {
     sqlite3_stmt *qe_gc;
     sqlite3_stmt *qe_count_upgradejobs;
     sqlite3_stmt *qe_parent;
+    sqlite3_stmt *qe_jstats;
     int addjob_begun;
 
     sxi_db_t *xferdb;
@@ -1051,6 +1053,7 @@ static void close_all_dbs(sx_hashfs_t *h) {
     sqlite3_finalize(h->qe_gc);
     sqlite3_finalize(h->qe_count_upgradejobs);
     sqlite3_finalize(h->qe_parent);
+    sqlite3_finalize(h->qe_jstats);
 
     sqlite3_finalize(h->rit.q_add);
     sqlite3_finalize(h->rit.q_sel);
@@ -2139,7 +2142,7 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
     snprintf(qrybuff, sizeof(qrybuff), "SELECT job FROM jobs WHERE type = %d AND data = :data AND complete = 0", JOBTYPE_DELETE_FILE);
     if(qprep(h->eventdb, &h->qe_getfiledeljob, qrybuff))
         goto open_hashfs_fail;
-    if(qprep(h->eventdb, &h->qe_addjob, "INSERT INTO jobs (parent, type, lock, expiry_time, data, user) SELECT :parent, :type, :lock, datetime(:expiry + strftime('%s', COALESCE((SELECT expiry_time FROM jobs WHERE job = :parent), 'now')), 'unixepoch'), :data, :uid"))
+    if(qprep(h->eventdb, &h->qe_addjob, "INSERT INTO jobs (parent, type, lock, expiry_time, data, user) VALUES(:parent, :type, :lock, datetime(:expiry + strftime('%s', COALESCE((SELECT expiry_time FROM jobs WHERE job = :parent), 'now')), 'unixepoch'), :data, :uid)"))
 	goto open_hashfs_fail;
     if(qprep(h->eventdb, &h->qe_mod_jobdata, "UPDATE jobs SET data = :data WHERE job = :id"))
         goto open_hashfs_fail;
@@ -2164,6 +2167,9 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
         goto open_hashfs_fail;
     if(qprep(h->eventdb, &h->qe_parent, "SELECT j1.parent, j2.type, j2.data FROM jobs AS j1 LEFT JOIN jobs AS j2 ON j1.parent = j2.job WHERE j1.job = :id"))
         goto open_hashfs_fail;
+    if(qprep(h->eventdb, &h->qe_jstats, "SELECT COUNT(user), COUNT(*) FROM jobs WHERE complete = 0 AND sched_time <= strftime('%Y-%m-%d %H:%M:%f')"))
+        goto open_hashfs_fail;
+
     if(qprep(h->eventdb, &h->rit.q_add, "INSERT OR IGNORE INTO hash_retry(hash, blocksize, id) VALUES(:hash, :blocksize, :hash)"))
         goto open_hashfs_fail;
     if(qprep(h->eventdb, &h->rit.q_sel, "SELECT hash, blocksize FROM hash_retry WHERE hash > :prevhash"))
@@ -3101,7 +3107,7 @@ void sx_hashfs_stats(sx_hashfs_t *h)
 	    blocks += get_count(h->datadb[j][i], "blocks");
 	INFO("\t%-8s (%8d byte) block#: %lld", sizelongnames[j], bsz[j], blocks);
     }
-    if(qprep(h->eventdb, &q, "SELECT type, SUM(complete = 1) as complete, SUM(complete = 1 AND result <> 0) as failed, SUM(complete = 0) as running FROM jobs GROUP BY type ORDER BY failed DESC")) {
+    if(qprep(h->eventdb, &q, "SELECT type, SUM(complete = 1) as complete, SUM(complete = 1 AND result <> 0) as failed, SUM(complete = 0) as running FROM jobs GROUP BY type ORDER BY failed DESC")) {/* SLOWQ */
         WARN("Failed to obtain job statistics");
         return;
     }
@@ -4139,7 +4145,7 @@ static int check_jobs(sx_hashfs_t *h, int debug) {
     int ret = 0, r;
     sqlite3_stmt *q = NULL;
 
-    if(qprep(h->eventdb, &q, "SELECT j1.job, j2.job, j1.user, j1.parent, j1.complete FROM jobs j1 LEFT JOIN jobs j2 ON j1.parent = j2.job WHERE j1.parent IS NOT NULL AND j1.user IS NOT NULL")) {
+    if(qprep(h->eventdb, &q, "SELECT j1.job, j2.job, j1.user, j1.parent, j1.complete FROM jobs j1 LEFT JOIN jobs j2 ON j1.parent = j2.job WHERE j1.parent IS NOT NULL AND j1.user IS NOT NULL")) { /* SLOWQ */
         CHECK_FATAL("Failed to prepare query");
         return -1;
     }
@@ -4449,6 +4455,17 @@ static rc_ty upgrade_db(int lockfd, const char *path, sxi_db_t *db, const sx_has
     qnullify(q);
     return ret;
 }
+
+static rc_ty eventsdb_2_1_5_to_2_1_6(sxi_db_t *db) {
+    sqlite3_stmt *q = NULL;
+    rc_ty ret = OK;
+
+    if(qprep(db, &q, "CREATE INDEX jobs_owner ON jobs (user, complete)") || qstep_noret(q))
+	ret = FAIL_EINTERNAL;
+    qnullify(q);
+    return ret;
+}
+
 
 /* Rename files with database switch */
 static rc_ty upgrade_2_1_4_to_2_1_5_rename_switch_dbs(sqlite3_stmt *qsel, sqlite3_stmt *qins, sqlite3_stmt *qdel, sqlite3_stmt *qmget, sqlite3_stmt *qmset, int64_t volid, int64_t oldid, const char *newname) {
@@ -5423,6 +5440,12 @@ static const sx_upgrade_t upgrade_sequence[] = {
         .from = HASHFS_VERSION_2_1_4,
         .to = HASHFS_VERSION_2_1_5,
         .upgrade_alldb = alldb_2_1_4_to_2_1_5,
+        .job = JOBTYPE_DUMMY
+    },
+    {
+        .from = HASHFS_VERSION_2_1_5,
+        .to = HASHFS_VERSION_2_1_6,
+        .upgrade_eventsdb = eventsdb_2_1_5_to_2_1_6,
         .job = JOBTYPE_DUMMY
     }
 };
@@ -18976,40 +18999,27 @@ rc_ty sx_hashfs_node_status(sx_hashfs_t *h, sxi_node_status_t *status) {
 
 rc_ty sx_hashfs_stats_jobq(sx_hashfs_t *h, int64_t *sysjobs, int64_t *userjobs) {
     int64_t scnt = 0, ucnt = 0;
-    sqlite3_stmt *q = NULL;
-    rc_ty ret = FAIL_EINTERNAL;
-    int r;
 
     if(!h) {
 	NULLARG();
         return EINVAL;
     }
 
-    if(qprep(h->eventdb, &q, "SELECT user IS NULL AS sysjob, COUNT(*) FROM jobs WHERE complete = 0 AND sched_time <= strftime('%Y-%m-%d %H:%M:%f') GROUP BY sysjob"))
-	goto stats_jobq_err;
-
-    while(1) {
-	r = qstep(q);
-	if(r == SQLITE_DONE) {
-	    ret = OK;
-	    break;
-	}
-	if(r != SQLITE_ROW)
-	    break;
-	if(sqlite3_column_int(q, 0))
-	    scnt = sqlite3_column_int64(q, 1);
-	else
-	    ucnt = sqlite3_column_int64(q, 1);
+    if(qstep_ret(h->qe_jstats)) {
+	msg_set_reason("Failed to count pending jobs");
+	return FAIL_EINTERNAL;
     }
 
- stats_jobq_err:
-    sqlite3_finalize(q);
+    ucnt = sqlite3_column_int64(h->qe_jstats, 0);
+    scnt = sqlite3_column_int64(h->qe_jstats, 1) - ucnt;
+    sqlite3_reset(h->qe_jstats);
+
     if(sysjobs)
 	*sysjobs = scnt;
     if(userjobs)
 	*userjobs = ucnt;
 
-    return ret;
+    return OK;
 }
 
 rc_ty sx_hashfs_stats_blockq(sx_hashfs_t *h, const sx_uuid_t *dest, int64_t *ready, int64_t *held, int64_t *unbumps) {

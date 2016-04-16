@@ -1981,8 +1981,14 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
 		goto open_hashfs_fail;
 	    if(qprep(h->datadb[j][i], &h->qb_find_unused_block[j][i], "SELECT id, blockno, hash FROM blocks LEFT JOIN revision_blocks ON blocks.hash=blocks_hash WHERE id  > :last AND revision_id IS NULL ORDER BY id"))
 		goto open_hashfs_fail;
-            if(qprep(h->datadb[j][i], &h->qb_find_gc_block[j][i], "SELECT id, blockno, blocks_hash FROM revision_blocks INNER JOIN blocks ON blocks.hash = blocks_hash WHERE blocks_hash IN (SELECT blocks_hash from revision_blocks where revision_id=:revision_id) GROUP BY blocks_hash HAVING revision_id=:revision_id AND COUNT(*)=1"))
+
+	    /*
+	       This is a much faster version of the next query which however may return dups:
+	       SELECT id, blockno, hash FROM revision_blocks AS a LEFT JOIN revision_blocks AS b ON b.blocks_hash=a.blocks_hash AND b.revision_id <> a.revision_id JOIN blocks ON blocks.hash = a.blocks_hash WHERE a.revision_id=:revision_id AND b.revision_id IS NULL
+	    */
+            if(qprep(h->datadb[j][i], &h->qb_find_gc_block[j][i], "SELECT id, blockno, hash FROM blocks WHERE hash IN ( SELECT blocks_hash FROM revision_blocks WHERE blocks_hash IN ( SELECT blocks_hash from revision_blocks where revision_id=:revision_id ) GROUP BY blocks_hash HAVING revision_id=:revision_id AND COUNT(*)=1 )"))
                 goto open_hashfs_fail;
+
             /* hash moved,
              * hashes that are not moved don't have the old counters deleted,
              * and must be taken into account when GCing!
@@ -3747,7 +3753,7 @@ static int check_blocks_existence(sx_hashfs_t *h, int debug, unsigned int hs, un
              (long long int)get_count(db, "blocks"), sizelongnames[hs], ndb+1, HASHDBS);
     }
 
-    if(qprep(db, &q, "SELECT id, hash, blockno FROM blocks WHERE blockno IS NOT NULL ORDER BY blockno ASC")) {
+    if(qprep(db, &q, "SELECT id, hash, blockno FROM blocks WHERE blockno IS NOT NULL ORDER BY blockno ASC")) { /* SLOWQ */
         ret = -1;
         goto check_blocks_existence_err;
     }
@@ -3831,7 +3837,7 @@ static int check_blocks_dups(sx_hashfs_t *h, int debug, unsigned int hs, unsigne
             (long long int)get_count(db, "blocks"), sizelongnames[hs], ndb+1, HASHDBS);
     }
 
-    if(qprep(db, &q, "SELECT b1.id, b1.hash, b2.id, b2.hash, b1.blockno FROM blocks AS b1 LEFT JOIN blocks AS b2 ON b1.id < b2.id WHERE b1.blockno = b2.blockno"))
+    if(qprep(db, &q, "SELECT b1.id, b1.hash, b2.id, b2.hash, b1.blockno FROM blocks AS b1 LEFT JOIN blocks AS b2 ON b1.id < b2.id WHERE b1.blockno = b2.blockno")) /* SLOWQ */
         goto check_blocks_dups_err;
 
     while(1) {
@@ -3980,7 +3986,7 @@ static int check_blocks(sx_hashfs_t *h, int debug) {
             sqlite3_stmt *avail = NULL;
 
             /* Check whether any block from hash table is considered as available*/
-            if(qprep(h->datadb[j][i], &avail, "SELECT blockno, lower(hex(hash)) FROM blocks JOIN avail WHERE blockno = avail.blocknumber ORDER BY blockno ASC")) {
+            if(qprep(h->datadb[j][i], &avail, "SELECT blockno, lower(hex(hash)) FROM blocks JOIN avail WHERE blockno = avail.blocknumber ORDER BY blockno ASC")) { /* SLOWQ */
                 ret = -1;
                 goto check_blocks_err;
             }
@@ -5216,7 +5222,7 @@ static rc_ty datadb_1_0_to_1_1(sxi_db_t *db)
     rc_ty ret = FAIL_EINTERNAL;
     sqlite3_stmt *q = NULL;
     do {
-        if(qprep(db, &q, "DELETE FROM blocks WHERE blockno IS NULL OR created_at IS NULL") || qstep_noret(q))
+        if(qprep(db, &q, "DELETE FROM blocks WHERE blockno IS NULL OR created_at IS NULL") || qstep_noret(q)) /* SLOWQ */
             break;
         qnullify(q);
         if(qprep(db, &q, "DROP TABLE IF EXISTS operations") || qstep_noret(q))
@@ -19534,7 +19540,7 @@ rc_ty sx_hashfs_compact(sx_hashfs_t *h, int64_t *bytes_freed) {
 	       qprep(h->datadb[hs][ndb], &qget, "SELECT blocknumber FROM avail ORDER BY blocknumber ASC") ||
 	       qprep(h->datadb[hs][ndb], &qdel, "DELETE FROM avail WHERE blocknumber >= :next") ||
 	       qprep(h->datadb[hs][ndb], &qupa, "UPDATE avail SET blocknumber = :wasfull WHERE blocknumber = :wasempty") ||
-	       qprep(h->datadb[hs][ndb], &qupb, "UPDATE blocks SET blockno = :wasempty WHERE blockno = :wasfull") ||
+	       qprep(h->datadb[hs][ndb], &qupb, "UPDATE blocks SET blockno = :wasempty WHERE blockno = :wasfull") || /* SLOWQ */
 	       qprep(h->datadb[hs][ndb], &qset, "UPDATE hashfs SET value = :next WHERE key = 'next_blockno'") ||
 	       qprep(h->datadb[hs][ndb], &qvac, "VACUUM")) {
 		WARN("Cannot prepare defrag queries on %s db #%u", sizelongnames[hs], ndb);

@@ -2108,7 +2108,7 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
 	    goto open_hashfs_fail;
 	if(qprep(h->metadb[i], &h->qm_delbyvol[i], "DELETE FROM files WHERE volume_id = :volid"))
 	    goto open_hashfs_fail;
-        if(qprep(h->metadb[i], &h->qm_sumfilesizes[i], "SELECT SUM(x), SUM(y), COUNT(x) FROM (SELECT files.size + LENGTH(CAST(files.name AS BLOB)) + SUM(COALESCE(LENGTH(CAST(fmeta.key AS BLOB)) + LENGTH(fmeta.value),0)) AS x, files.size AS y FROM files LEFT JOIN fmeta ON files.fid = fmeta.file_id WHERE files.volume_id = :volid AND age >= 0 GROUP BY files.fid)"))
+        if(qprep(h->metadb[i], &h->qm_sumfilesizes[i], "SELECT SUM(files.size + LENGTH(CAST(files.name AS BLOB))) + SUM(COALESCE((SELECT SUM(LENGTH(CAST(fmeta.key AS BLOB)) + LENGTH(CAST(fmeta.value AS BLOB))) FROM fmeta WHERE fmeta.file_id = files.fid), 0)), SUM(files.size), COUNT(*) FROM files WHERE files.volume_id = :volid AND age >= 0"))
             goto open_hashfs_fail;
         if(qprep(h->metadb[i], &h->qm_newest[i], "SELECT MAX(rev) FROM files WHERE volume_id = :volid AND age >= 0"))
             goto open_hashfs_fail;

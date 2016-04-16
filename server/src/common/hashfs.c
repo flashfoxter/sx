@@ -1870,7 +1870,7 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
         goto open_hashfs_fail;
     if(qprep(h->db, &h->q_changerevs, "UPDATE volumes SET revs = :revs WHERE vid = :volid AND enabled = 1"))
         goto open_hashfs_fail;
-    if(qprep(h->db, &h->q_minreqs, "SELECT COALESCE(MAX(replica), 1), COALESCE(SUM(maxsize*replica), 0) FROM volumes"))
+    if(qprep(h->db, &h->q_minreqs, "SELECT COALESCE(MAX(replica), 1), COALESCE(SUM(maxsize*replica), 0) FROM volumes")) /* SLOWQ */
         goto open_hashfs_fail;
     if(qprep(h->db, &h->q_updatevolcursize, "UPDATE volumes SET cursize = cursize + :size, cursize_files = cursize_files + :fsize, nfiles = nfiles + :nfiles, changed = :now WHERE vid = :volume AND enabled = 1"))
         goto open_hashfs_fail;
@@ -1973,7 +1973,7 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
                 goto open_hashfs_fail;
             if(qprep(h->datadb[j][i], &h->rit.q[j][i], "SELECT hash FROM blocks WHERE hash > :prevhash"))
                 goto open_hashfs_fail;
-            if(qprep(h->datadb[j][i], &h->rit.q_num[j][i], "SELECT COUNT(hash) FROM blocks"))
+            if(qprep(h->datadb[j][i], &h->rit.q_num[j][i], "SELECT COUNT(hash) FROM blocks")) /* SLOWQ */
                 goto open_hashfs_fail;
 	    if(qprep(h->datadb[j][i], &h->qb_del_reserve[j][i], "DELETE FROM reservations WHERE reservations_id=:reserve_id"))
 		goto open_hashfs_fail;
@@ -2134,7 +2134,7 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
             goto open_hashfs_fail;
         if(qprep(h->metadb[i], &h->qm_del_heal_volume[i], "DELETE FROM heal_volume WHERE name=:name"))
             goto open_hashfs_fail;
-        if(qprep(h->metadb[i], &h->qm_needs_upgrade[i], "SELECT fid, volume_id, name, rev, size FROM files WHERE revision_id IS NULL AND age >= 0"))
+        if(qprep(h->metadb[i], &h->qm_needs_upgrade[i], "SELECT fid, volume_id, name, rev, size FROM files WHERE revision_id IS NULL AND age >= 0")) /* SLOWQ */
             goto open_hashfs_fail;
     }
 
@@ -3634,7 +3634,7 @@ static int check_files(sx_hashfs_t *h, int debug) {
         sqlite3_stmt *list = NULL;
         int rows = 0;
 
-        if(qprep(h->metadb[i], &list, "SELECT fid, volume_id, name, size, content FROM files WHERE age >= 0 ORDER BY name ASC")) {
+        if(qprep(h->metadb[i], &list, "SELECT fid, volume_id, name, size, content FROM files WHERE age >= 0 ORDER BY name ASC")) { /* SLOWQ */
             ret = -1;
             CHECK_FATAL("Failed to prepare queries");
             goto check_files_itererr;

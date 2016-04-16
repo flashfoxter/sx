@@ -4472,6 +4472,23 @@ static rc_ty eventsdb_2_1_5_to_2_1_6(sxi_db_t *db) {
     return ret;
 }
 
+static rc_ty hashfs_2_1_5_to_2_1_6(sxi_db_t *db) {
+    rc_ty ret = FAIL_EINTERNAL;
+    sqlite3_stmt *q = NULL;
+    do {
+        /* A FKs are a CHECK, not an INDEX */
+        if(qprep(db, &q, "CREATE INDEX pvivs_user ON privs(user_id)") || qstep_noret(q))
+            break;
+	qnullify(q);
+        if(qprep(db, &q, "CREATE INDEX volumes_owner ON volumes(owner_id)") || qstep_noret(q))
+            break;
+	qnullify(q);
+
+        ret = OK;
+    } while(0);
+    qnullify(q);
+    return ret;
+}
 
 /* Rename files with database switch */
 static rc_ty upgrade_2_1_4_to_2_1_5_rename_switch_dbs(sqlite3_stmt *qsel, sqlite3_stmt *qins, sqlite3_stmt *qdel, sqlite3_stmt *qmget, sqlite3_stmt *qmset, int64_t volid, int64_t oldid, const char *newname) {
@@ -5451,6 +5468,7 @@ static const sx_upgrade_t upgrade_sequence[] = {
     {
         .from = HASHFS_VERSION_2_1_5,
         .to = HASHFS_VERSION_2_1_6,
+        .upgrade_hashfsdb = hashfs_2_1_5_to_2_1_6,
         .upgrade_eventsdb = eventsdb_2_1_5_to_2_1_6,
         .job = JOBTYPE_DUMMY
     }

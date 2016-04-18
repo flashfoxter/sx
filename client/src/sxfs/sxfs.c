@@ -824,20 +824,20 @@ static int sxfs_update_filemeta (const char *path, int function, mode_t mode, ui
 
     switch(function) {
         case SXFS_CHMOD: {
-            sxfs_log(sxfs, "sxfs_chmod", 1, "'%s', mode: %c%c%c%c%c%c%c%c%c%c (%o)", path, S_ISDIR(mode) ? 'd' : '-',
+            sxfs_log(sxfs, "sxfs_chmod", SXFS_LOG_TYPE_DEBUG, "'%s', mode: %c%c%c%c%c%c%c%c%c%c (%o)", path, S_ISDIR(mode) ? 'd' : '-',
                 mode & S_IRUSR ? 'r' : '-', mode & S_IWUSR ? 'w' : '-', mode & S_IXUSR ? 'x' : '-',
                 mode & S_IRGRP ? 'r' : '-', mode & S_IWGRP ? 'w' : '-', mode & S_IXGRP ? 'x' : '-',
                 mode & S_IROTH ? 'r' : '-', mode & S_IWOTH ? 'w' : '-', mode & S_IXOTH ? 'x' : '-', (unsigned int)mode); /* there will be S_IRUSR and S_IWUSR added */
             break;
         }
         case SXFS_CHOWN: {
-            sxfs_log(sxfs, "sxfs_chown", 1, "'%s', uid: %d, gid: %d", path, (int)uid, (int)gid);
+            sxfs_log(sxfs, "sxfs_chown", SXFS_LOG_TYPE_DEBUG, "'%s', uid: %d, gid: %d", path, (int)uid, (int)gid);
             break;
         }
         case SXFS_UTIMENS: {
             struct tm *tm = localtime(&mtime);
             if(tm)
-                sxfs_log(sxfs, "sxfs_utimens", 1, "'%s', mtime: %02d-%02d-%04d %02d:%02d:%02d (%ld)", path, tm->tm_mday, tm->tm_mon + 1, tm->tm_year + 1900, tm->tm_hour, tm->tm_min, tm->tm_sec, (long int)mtime);
+                sxfs_log(sxfs, "sxfs_utimens", SXFS_LOG_TYPE_DEBUG, "'%s', mtime: %02d-%02d-%04d %02d:%02d:%02d (%ld)", path, tm->tm_mday, tm->tm_mon + 1, tm->tm_year + 1900, tm->tm_hour, tm->tm_min, tm->tm_sec, (long int)mtime);
             else
                 sxfs_log(sxfs, "sxfs_utimens", 1, "'%s, mtime: %ld'", path, (long int)mtime);
             break;

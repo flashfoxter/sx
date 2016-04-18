@@ -57,7 +57,6 @@
 #define SXFS_THREAD_WAIT 200000L /* microseconds to wait for other threads (200000 -> 0.2s) */
 #define SXFS_THREAD_SLEEP 5000000L /* microseconds deletion and upload threads wait for next turn */
 #define SXFS_LS_RELOAD 3.0 /* seconds sxfs assumes data it already has is up to date */
-#define SXFS_LAST_ACTION_WAIT 1.0 /* seconds must have been passed since last file action */
 
 #define SXFS_LOG_TYPE_NORMAL 0x1
 #define SXFS_LOG_TYPE_DEBUG 0x2

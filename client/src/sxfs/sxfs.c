@@ -69,16 +69,6 @@
 static int check_path_len (sxfs_state_t *sxfs, const char *path, int is_dir) {
     if(strlen(path) + (is_dir ? 1 + lenof(SXFS_SXNEWDIR) : 0) > SXLIMIT_MAX_FILENAME_LEN)
         return -ENAMETOOLONG;
-    if(sxfs->args->use_queues_flag) {
-        char *ptr = strrchr(path, '/');
-        if(!ptr) {
-            SXFS_ERROR("'/' not found in '%s'", path);
-            return -EINVAL;
-        }
-        ptr++;
-        if(strlen(ptr) > NAME_MAX)
-            return -ENAMETOOLONG;
-    }
     return 0;
 } /* check_path_len */
 
@@ -1689,7 +1679,7 @@ static int sxfs_statfs (const char *path, struct statvfs *st) {
     st->f_bfree = st->f_bavail = (fsblkcnt_t)((volsize - used_volsize + SX_BS_SMALL - 1) / SX_BS_SMALL);
     st->f_files = (fsblkcnt_t)(volsize / SX_BS_SMALL);
     st->f_ffree = st->f_favail = (fsblkcnt_t)((volsize - used_volsize) / SX_BS_SMALL);
-    st->f_namemax = sxfs->args->use_queues_flag ? NAME_MAX : SXLIMIT_MAX_FILENAME_LEN; /* upload queue is stored in local directory and this enforces shorter filenames */
+    st->f_namemax = SXLIMIT_MAX_FILENAME_LEN;
 
     ret = 0;
 sxfs_statfs_err:

@@ -1883,7 +1883,7 @@ sx_hashfs_t *sx_hashfs_open(const char *dir, sxc_client_t *sx) {
         goto open_hashfs_fail;
     if(qprep(h->db, &h->q_modreplica, "UPDATE volumes SET replica = :next_replica, prev_replica = :replica, changed = :now WHERE vid = :volume_id"))
         goto open_hashfs_fail;
-    if(qprep(h->db, &h->q_is_replica_modified, "SELECT 1 FROM volumes WHERE replica <> prev_replica"))
+    if(qprep(h->db, &h->q_is_replica_modified, "SELECT 1 FROM volumes WHERE replica <> prev_replica LIMIT 1"))
         goto open_hashfs_fail;
 
     if(!(h->tempdb = open_db(dir, "tempdb", &h->cluster_uuid, &curver, h->q_getval)))

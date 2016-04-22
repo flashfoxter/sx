@@ -18520,20 +18520,27 @@ rc_ty sx_hashfs_volrep_update_revid_replica(sx_hashfs_t *h, const sx_hashfs_volu
         next_replica = vol->prev_max_replica;
     }
 
+    /* Use a transaction in order to safely avoid locking issues later. If locking fails, then we can gracefully retry later. */
+    if(datadb_beginall(h))
+        return FAIL_LOCKED;
+
     for(sizeidx = 0; sizeidx < SIZES; sizeidx++) {
         for(ndb = 0; ndb < HASHDBS; ndb++) {
             sqlite3_stmt *q = h->qb_volrep_update_replica[sizeidx][ndb];
 
             if(qbind_blob(q, ":global_vol_id", vol->global_id.b, sizeof(vol->global_id.b)) || qbind_int(q, ":prev_replica", prev_replica) ||
                qbind_int(q, ":next_replica", next_replica) || qstep_noret(q)) {
-                WARN("Failed to release over-replica blocks");
+                WARN("Failed to update replica");
                 sqlite3_reset(q);
+                datadb_rollbackall(h);
                 return FAIL_EINTERNAL;
             }
             sqlite3_reset(q);
         }
     }
 
+    if(datadb_commitall(h))
+        return FAIL_EINTERNAL;
     return OK;
 }
 

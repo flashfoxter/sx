@@ -6307,9 +6307,12 @@ static rc_ty volrep_blocks_request(sx_hashfs_t *hashfs, job_t job_id, job_data_t
 
     sx_hashfs_set_progress_info(hashfs, INPRG_VOLREP_RUNNING, "Preparing local blocks to replica change");
 
-    if((s = sx_hashfs_volrep_update_revid_replica(hashfs, vol, is_undoing)) != OK)
-        action_error(rc2actres(s), rc2http(s), msg_get_reason());
-
+    if((s = sx_hashfs_volrep_update_revid_replica(hashfs, vol, is_undoing)) != OK) {
+        if(s == FAIL_LOCKED) /* rc2actres(FAIL_LOCKED) will give a PERMFAIL, we want to try again later. */
+            action_error(ACT_RESULT_TEMPFAIL, 503, "Database is locked");
+        else
+            action_error(rc2actres(s), rc2http(s), msg_get_reason());
+    }
     succeeded[0] = 1;
 action_failed:
     sx_blob_free(b);

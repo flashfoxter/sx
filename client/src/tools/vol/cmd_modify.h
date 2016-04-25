@@ -52,6 +52,9 @@ struct modify_args_info
   int max_revisions_arg;	/**< @brief Set a new revisions limit for files in the volume.  */
   char * max_revisions_orig;	/**< @brief Set a new revisions limit for files in the volume original value given at command line.  */
   const char *max_revisions_help; /**< @brief Set a new revisions limit for files in the volume help description.  */
+  char * name_arg;	/**< @brief Rename the volume.  */
+  char * name_orig;	/**< @brief Rename the volume original value given at command line.  */
+  const char *name_help; /**< @brief Rename the volume help description.  */
   int reset_custom_meta_flag;	/**< @brief Reset custom metadata assigned to the volume (default=off).  */
   const char *reset_custom_meta_help; /**< @brief Reset custom metadata assigned to the volume help description.  */
   int reset_local_config_flag;	/**< @brief Reset local configuration of the volume (default=off).  */
@@ -74,6 +77,7 @@ struct modify_args_info
   unsigned int owner_given ;	/**< @brief Whether owner was given.  */
   unsigned int size_given ;	/**< @brief Whether size was given.  */
   unsigned int max_revisions_given ;	/**< @brief Whether max-revisions was given.  */
+  unsigned int name_given ;	/**< @brief Whether name was given.  */
   unsigned int reset_custom_meta_given ;	/**< @brief Whether reset-custom-meta was given.  */
   unsigned int reset_local_config_given ;	/**< @brief Whether reset-local-config was given.  */
   unsigned int debug_given ;	/**< @brief Whether debug was given.  */

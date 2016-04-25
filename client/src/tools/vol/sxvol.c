@@ -349,7 +349,7 @@ static int volume_create(sxc_client_t *sx, const char *owner)
 
     ret = sxc_volume_add(cluster, uri->volume, size, create_args.replica_arg, create_args.max_revisions_arg, vmeta, owner);
     if(!ret && sxc_meta_count(cvmeta))
-	ret = sxc_volume_modify(cluster, uri->volume, NULL, -1, -1, cvmeta);
+	ret = sxc_volume_modify(cluster, uri->volume, NULL, NULL, -1, -1, cvmeta);
 
     if(!ret)
 	ret = sxi_volume_cfg_store(sx, cluster, uri->volume, filter ? filter->uuid : NULL, cfgdata, cfgdata_len);
@@ -538,14 +538,16 @@ int main(int argc, char **argv) {
             goto main_err;
         }
 
-        if(!modify_args.owner_given && !modify_args.size_given && !modify_args.max_revisions_given && !modify_args.reset_custom_meta_given && !modify_args.reset_local_config_given && !modify_args.replica_given) {
+        if(!modify_args.name_given && !modify_args.owner_given && !modify_args.size_given && !modify_args.max_revisions_given &&
+           !modify_args.reset_custom_meta_given && !modify_args.reset_local_config_given && !modify_args.replica_given) {
             modify_cmdline_parser_print_help();
             printf("\n");
             fprintf(stderr, "ERROR: Invalid arguments\n");
             modify_cmdline_parser_free(&modify_args);
             goto main_err;
         }
-        if(modify_args.replica_given && (modify_args.size_given || modify_args.max_revisions_given || modify_args.reset_custom_meta_given || modify_args.reset_local_config_given)) {
+        if(modify_args.replica_given && (modify_args.name_given || modify_args.owner_given || modify_args.size_given ||
+           modify_args.max_revisions_given || modify_args.reset_custom_meta_given || modify_args.reset_local_config_given)) {
             fprintf(stderr, "ERROR: Volume replica modification is a complex operation and it cannot be used with other options\n");
             modify_cmdline_parser_free(&modify_args);
             goto main_err;
@@ -607,12 +609,14 @@ int main(int argc, char **argv) {
 	    }
 	}
 
-        if(modify_args.owner_given || modify_args.size_given || modify_args.max_revisions_given || modify_args.reset_custom_meta_given) {
-	    ret = sxc_volume_modify(cluster, uri->volume, modify_args.owner_arg, size, revs, meta);
+        if(modify_args.name_given || modify_args.owner_given || modify_args.size_given || modify_args.max_revisions_given || modify_args.reset_custom_meta_given) {
+	    ret = sxc_volume_modify(cluster, uri->volume, modify_args.name_arg, modify_args.owner_arg, size, revs, meta);
 	    if(ret) {
 		fprintf(stderr, "ERROR: %s\n", sxc_geterrmsg(sx));
 		goto modify_err;
 	    } else {
+                if(modify_args.name_given)
+                    printf("Volume renamed to '%s'\n", modify_args.name_arg);
 		if(modify_args.owner_given)
 		    printf("Volume owner changed to '%s'\n", modify_args.owner_arg);
 		if(modify_args.size_given)
